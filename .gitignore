@@ -4,3 +4,7 @@
 *.jar
 *.war
 *.ear
+/gradlew
+/gradlew.bat
+/gradle
+/.gradle

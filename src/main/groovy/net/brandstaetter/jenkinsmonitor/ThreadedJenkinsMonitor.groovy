@@ -1,0 +1,459 @@
+package net.brandstaetter.jenkinsmonitor
+
+import groovy.json.JsonSlurper
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+import thingm.blink1.Blink1
+
+import java.awt.*
+import java.text.SimpleDateFormat
+import java.util.List
+import java.util.concurrent.BlockingQueue
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
+
+/**
+ * Created by brandstaetter on 08.02.14.
+ */
+class ThreadedJenkinsMonitor {
+
+    public static void main(String... args) {
+        Properties properties = new Properties()
+        File propertiesFile = new File('settings.properties')
+        if (!propertiesFile.exists()) {
+            properties.store(new FileOutputStream(propertiesFile), null)
+        }
+        properties.load new FileInputStream(propertiesFile)
+
+        final BlockingQueue<Message<JenkinsBuild>> queue = new LinkedBlockingQueue<Message<JenkinsBuild>>()
+
+        Runtime.getRuntime().addShutdownHook(new Thread() {
+            public void run() {
+                // send poison pill
+                queue.offer(new Message<JenkinsBuild>(JenkinsBuild.green, Message.MessageType.END))
+            }
+        });
+        JenkinsMonitor checkThread = new JenkinsMonitor(queue)
+        Broadcaster broadcaster = new Broadcaster(queue)
+
+
+
+        System.out.println("Press q followed by Enter to terminate");
+
+        // multiplexer
+        broadcaster.start()
+        // consumers
+        if (properties.getProperty('runConsole', 'true').equalsIgnoreCase('true')) {
+            final BlockingQueue<Message<JenkinsBuild>> queueForConsole = new LinkedBlockingQueue<Message<JenkinsBuild>>()
+            ConsoleOutput consoleOutputThread = new ConsoleOutput(queueForConsole)
+            broadcaster.addConsumer(queueForConsole)
+            consoleOutputThread.start()
+        }
+        if (properties.getProperty('runBlink', 'false').equalsIgnoreCase('true')) {
+            final BlockingQueue<Message<JenkinsBuild>> queueForBlink = new LinkedBlockingQueue<Message<JenkinsBuild>>()
+            Blink1Output blinkOutputThread = new Blink1Output(queueForBlink)
+            broadcaster.addConsumer(queueForBlink)
+            blinkOutputThread.start()
+        }
+
+        // producer
+        checkThread.start()
+
+        def msg
+        def reader = new BufferedReader(new InputStreamReader(System.in))
+        while (true) {
+            try {
+                msg = reader.readLine();
+            } catch (Exception e) {
+                msg = "continue"
+            }
+
+            if (msg != null && msg.equalsIgnoreCase("q")) {
+                // send poison pill
+                checkThread.tellQuit()
+                checkThread.interrupt()
+                queue.offer(new Message<JenkinsBuild>(JenkinsBuild.green, Message.MessageType.END))
+                break;
+            }
+        }
+        properties.setProperty('runConsole', 'true')
+        properties.setProperty('runBlink', 'false')
+        properties.store(new FileOutputStream(propertiesFile), null)
+    }
+}
+
+/** Producer */
+class JenkinsMonitor extends Thread {
+    private static Logger log = LoggerFactory.getLogger(JenkinsMonitor.class)
+    static List<String> abortedColors = ["aborted"]
+    static List<String> abortedAnimColors = ["aborted_anime"]
+    static List<String> failingColors = ["red"]
+    static List<String> failingAnimColors = ["red_anime"]
+    static List<String> unstableColors = ["yellow"]
+    static List<String> unstableAnimColors = ["yellow_anime"]
+    static List<String> successAnimColors = ["blue_anime"]
+
+    private static String mainUrl
+    private static String basicAuthentication
+    private static String interestingBuildsList
+    private static String animIfBuildingList
+
+    private static long millisForNextCheck
+    private final BlockingQueue<Message<JenkinsBuild>> queue
+    private boolean quit;
+
+    public JenkinsMonitor(final BlockingQueue<Message<JenkinsBuild>> queue) {
+        this.queue = queue;
+        this.quit = false
+
+        Properties properties = new Properties()
+        File propertiesFile = new File('settings.properties')
+        if (!propertiesFile.exists()) {
+            properties.store(new FileOutputStream(propertiesFile), null)
+        }
+        properties.load new FileInputStream(propertiesFile)
+
+        if (!properties.stringPropertyNames().contains("mainUrl")
+                || !properties.stringPropertyNames().contains("basicAuthentication")
+                || !properties.stringPropertyNames().contains("interestingBuildsList")) {
+            // die, consumers.
+            queue.offer(new Message<JenkinsBuild>(JenkinsBuild.green, Message.MessageType.END))
+            throw new RuntimeException("mainUrl, basicAuthentication and interestingBuildsList have to be configured in settings.properties!")
+        }
+        try {
+            millisForNextCheck = Long.parseLong(properties.getProperty("millisForNextCheck", "60000"))
+        } catch (NumberFormatException ignored) {
+            millisForNextCheck = 60000 //60*1000ms = 1 minute
+        }
+
+        mainUrl = properties.getProperty("mainUrl").trim()
+        basicAuthentication = properties.getProperty("basicAuthentication").trim()
+        interestingBuildsList = properties.getProperty("interestingBuildsList")
+        animIfBuildingList = properties.getProperty("animIfBuildingList", '[]')
+    }
+
+    @Override
+    public void run() {
+        JenkinsBuild currentState
+        def closure = { quit = true }
+        while (!quit) {
+
+            try {
+                currentState = statusReport()
+                log.info(currentState.toString())
+            } catch (Exception e) {
+                currentState = JenkinsBuild.exception
+                log.error(currentState.toString(), e)
+            }
+            queue.offer(new Message<JenkinsBuild>(currentState))
+
+            sleep(millisForNextCheck, closure) // need a closure here, default sleep ignores interrupts
+        }
+        queue.offer(new Message<JenkinsBuild>(JenkinsBuild.green, Message.MessageType.END))
+        System.out.println("Jenkins Monitor terminated.")
+    }
+
+    public void tellQuit() {
+        this.quit = true
+    }
+
+    static JenkinsBuild statusReport() {
+
+        def url = (mainUrl + '/api/json?tree=jobs[name,color,url]').toURL()
+        def json = url.getText requestProperties: ['Authorization': ('Basic ' + basicAuthentication)]
+        def result = new JsonSlurper().parseText json
+
+        def interestingBuilds = Eval.me(interestingBuildsList)
+        def animIfBuilding = Eval.me(animIfBuildingList)
+        def missingJobs = new ArrayList<>((Collection) interestingBuilds)
+
+        def greenAnim = false
+        for (def job : result.jobs) {
+            if (job.name.trim().toLowerCase() in interestingBuilds) {
+                missingJobs.remove(job.name.trim().toLowerCase())
+                if (job.color in failingColors) {
+                    return JenkinsBuild.red
+                } else if (job.color in failingAnimColors) {
+                    return JenkinsBuild.red_anim
+                } else if (job.color in unstableColors) {
+                    return JenkinsBuild.yellow
+                } else if (job.color in unstableAnimColors) {
+                    return JenkinsBuild.yellow_anim
+                } else if (job.color in abortedColors) {
+                    return JenkinsBuild.gray
+                } else if (job.color in abortedAnimColors) {
+                    return JenkinsBuild.gray_anim
+                }
+            }
+            if (job.name.trim().toLowerCase() in animIfBuilding) {
+                if (job.color in successAnimColors) {
+                    greenAnim = true
+                }
+            }
+        }
+        if (missingJobs.isEmpty()) {
+            if (greenAnim) {
+                return JenkinsBuild.green_anim
+            }
+            return JenkinsBuild.green
+        }
+        return JenkinsBuild.missing
+    }
+}
+
+/** Multiplexer */
+class Broadcaster extends Thread {
+
+    private final BlockingQueue<Message<JenkinsBuild>> queue
+    private boolean quit;
+
+    private final List<BlockingQueue<Message<JenkinsBuild>>> consumers
+
+    public Broadcaster(final BlockingQueue<Message<JenkinsBuild>> queue) {
+        this.queue = queue;
+        this.quit = false;
+        this.consumers = new ArrayList<BlockingQueue<Message<JenkinsBuild>>>()
+    }
+
+    public addConsumer(BlockingQueue<Message<JenkinsBuild>> consumer) {
+        if (consumer != null) {
+            consumers.add consumer
+        }
+    }
+
+    public void tellQuit() {
+        this.quit = true
+    }
+
+    public void run() {
+        while (!quit) {
+            Message<JenkinsBuild> consumed = null
+            while (consumed == null) {
+                consumed = queue.poll(2L, TimeUnit.SECONDS);
+            }
+
+            for (BlockingQueue<Message<JenkinsBuild>> consumer : consumers) {
+                consumer.offer(consumed)
+            }
+
+            // "poison pill"
+            if (consumed.type == Message.MessageType.END) {
+                queue.offer(consumed); // leave it for the other consumers
+                tellQuit()
+                break;
+            }
+        }
+        System.out.println("Broadcaster terminated.")
+    }
+
+}
+
+/** Consumer */
+class ConsoleOutput extends Thread {
+    private static int buildsPerRow = 10
+    private static int buildsPerSeparator = 5
+    private static JenkinsBuild lastState
+    private static JenkinsBuild currentState
+
+    private final BlockingQueue<Message<JenkinsBuild>> queue
+    private boolean quit;
+
+    public ConsoleOutput(final BlockingQueue<Message<JenkinsBuild>> queue) {
+        this.queue = queue;
+        this.quit = false;
+
+        Properties properties = new Properties()
+        File propertiesFile = new File('settings.properties')
+        if (!propertiesFile.exists()) {
+            properties.store(new FileOutputStream(propertiesFile), null)
+        }
+        properties.load new FileInputStream(propertiesFile)
+
+        try {
+            buildsPerRow = Integer.parseInt(properties.getProperty("buildsPerRow", "10"))
+        } catch (NumberFormatException ignored) {
+            buildsPerRow = 10
+        }
+        try {
+            buildsPerSeparator = Integer.parseInt(properties.getProperty("buildsPerSeparator", "5"))
+        } catch (NumberFormatException ignored) {
+            buildsPerSeparator = 5
+        }
+    }
+
+    public void tellQuit() {
+        this.quit = true
+    }
+
+    @Override
+    public void run() {
+        lastState = JenkinsBuild.green
+        SimpleDateFormat sdfHour = new SimpleDateFormat(" HH:mm ")
+        SimpleDateFormat sdfDay = new SimpleDateFormat(" yyyy.MM.dd:")
+        Date currentDay = new Date()
+        long counter = 1
+        Date lastStateChangeDate = new Date();
+
+        System.out.println(sdfDay.format(currentDay));
+
+        while (!quit) {
+            Message<JenkinsBuild> consumed = null
+            while (consumed == null) {
+                consumed = queue.poll(2L, TimeUnit.SECONDS);
+            }
+
+            // "poison pill"
+            if (consumed.type == Message.MessageType.END) {
+                queue.offer(consumed); // leave it for the other consumers
+                tellQuit()
+                break;
+            }
+            currentState = consumed.message
+            Date currentTime = new Date()
+            if (currentDay.getDay() != currentTime.getDay()) {
+                currentDay = currentTime
+                counter = 1
+                System.out.println("\n\n" + sdfDay.format(currentDay))
+            }
+            System.out.print(sdfHour.format(currentTime) + currentState.s + " ")
+            if ((counter % buildsPerRow) == 0) System.out.println();
+            if ((counter % buildsPerSeparator) == 0 && (counter % buildsPerRow) != 0) System.out.print(" ")
+            counter++
+            if (!lastState.equals(currentState)) {
+                System.out.println()
+                System.out.println("state change: $lastState -> $currentState, $lastState lasted for "
+                        + (currentTime.getTime() - lastStateChangeDate.getTime()) / (1000 * 60) + " minutes");
+                lastState = currentState;
+                lastStateChangeDate = currentTime
+            }
+        }
+        System.out.println("Console Output terminated.")
+    }
+}
+
+/** Consumer */
+class Blink1Output extends Thread {
+    private static int blinkFadeTimeMillis = 1000
+    private static JenkinsBuild lastState
+    private static JenkinsBuild currentState
+
+    private final BlockingQueue<Message<JenkinsBuild>> queue
+    private boolean quit;
+
+    public Blink1Output(final BlockingQueue<Message<JenkinsBuild>> queue) {
+        this.queue = queue;
+        this.quit = false;
+
+        Properties properties = new Properties()
+        File propertiesFile = new File('settings.properties')
+        if (!propertiesFile.exists()) {
+            properties.store(new FileOutputStream(propertiesFile), null)
+        }
+        properties.load new FileInputStream(propertiesFile)
+        try {
+            blinkFadeTimeMillis = Integer.parseInt(properties.getProperty("blinkFadeTimeMillis", "1000"))
+        } catch (NumberFormatException ignored) {
+            blinkFadeTimeMillis = 1000
+        }
+    }
+
+    public void tellQuit() {
+        this.quit = true
+    }
+
+    @Override
+    public void run() {
+        lastState = JenkinsBuild.green
+        currentState = JenkinsBuild.green
+
+        Blink1 blink1 = new Blink1();
+
+        Message<JenkinsBuild> consumed
+        while (!quit) {
+            consumed = queue.poll(2L, TimeUnit.SECONDS);
+
+            // "poison pill"
+            if (consumed != null && consumed.type == Message.MessageType.END) {
+                queue.offer(consumed); // leave it for the other consumers
+                tellQuit()
+                break;
+            }
+            currentState = consumed != null ? consumed.message : currentState
+
+            blink1.enumerate();
+
+            if (blink1.getCount() > 0) {
+                if (currentState.blinking) {
+                    blink1.open();
+                    blink1.fadeToRGB(blinkFadeTimeMillis, Color.black);
+                    blink1.close();
+                    sleep(blinkFadeTimeMillis * 3)
+                    blink1.open();
+                    blink1.fadeToRGB(blinkFadeTimeMillis, currentState.c);
+                    blink1.close();
+                    sleep(blinkFadeTimeMillis * 3)
+                } else {
+                    blink1.open();
+                    blink1.fadeToRGB(blinkFadeTimeMillis, currentState.c);
+                    blink1.close();
+                }
+            }
+
+        }
+        if (blink1.count > 0) {
+            blink1.open()
+            blink1.setRGB(Color.black)
+            blink1.close()
+        }
+        System.out.println("blink(1) Output terminated.")
+    }
+}
+
+enum JenkinsBuild {
+    green(Color.GREEN, "G", false),
+    green_anim(Color.GREEN, "G", true),
+    yellow(Color.YELLOW, "Y", false),
+    yellow_anim(Color.YELLOW, "Y", true),
+    red(Color.RED, "R", false),
+    red_anim(Color.RED, "R", true),
+    gray(Color.WHITE, "A", false),
+    gray_anim(Color.WHITE, "A", true),
+    exception(Color.BLUE, "E", false),
+    missing(Color.CYAN, "M", false)
+
+    public Color c;
+    public String s;
+    public boolean blinking
+
+    private JenkinsBuild(Color c, String s, boolean blinking) {
+        this.c = c;
+        this.s = s;
+        this.blinking = blinking
+    }
+}
+
+public class Message<E> {
+    enum MessageType {
+        STANDARD, END
+    }
+
+    private final MessageType type;
+    private final E message;
+
+    public Message(final E message) {
+        this(message, MessageType.STANDARD);
+    }
+
+    public Message(final E message, final MessageType type) {
+        this.message = message;
+        this.type = type;
+    }
+
+    public MessageType getType() {
+        return type;
+    }
+
+    public E getMessage() {
+        return message;
+    }
+}
