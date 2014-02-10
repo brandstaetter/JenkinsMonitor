@@ -8,3 +8,7 @@
 /gradlew.bat
 /gradle
 /.gradle
+/build
+*.iml
+*.ipr
+*.iws
