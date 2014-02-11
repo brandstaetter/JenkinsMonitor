@@ -365,6 +365,7 @@ class ConsoleOutput extends AbstractConsoleOutput {
 
 /** Consumer */
 class JansiOutput extends AbstractConsoleOutput {
+    private static Logger log = LoggerFactory.getLogger(JansiOutput.class)
 
     public JansiOutput(BlockingQueue<Message<JenkinsBuild>> queue, Configuration configuration) {
         super(queue, configuration)
@@ -419,12 +420,13 @@ class JansiOutput extends AbstractConsoleOutput {
 
     @Override
     protected void printStateChange(JenkinsBuild lastState, JenkinsBuild currentState, double timeInMinutes) {
-        //To change body of implemented methods use File | Settings | File Templates.
+        log.info("state change: $lastState -> $currentState, $lastState lasted for "+ timeInMinutes + " minutes");
     }
 
     @Override
     protected void printTerminated() {
         AnsiConsole.systemUninstall();
+        System.out.print("Jansi Console terminated.")
     }
 }
 
