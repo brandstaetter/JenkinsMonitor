@@ -33,6 +33,6 @@ appender("logging-file", FileAppender) {
         pattern = "%date;%msg%n"
     }
 }
-logger("net.brandstaetter", ERROR)
+logger("net.brandstaetter", INFO)
 
 root(ERROR, ["logging-file"])

@@ -8,15 +8,15 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import thingm.blink1.Blink1
 
-import static org.fusesource.jansi.Ansi.ansi;
-import static org.fusesource.jansi.Ansi.Color.*;
-
 import java.awt.*
 import java.text.SimpleDateFormat
 import java.util.List
 import java.util.concurrent.BlockingQueue
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+
+import static org.fusesource.jansi.Ansi.Color.*
+import static org.fusesource.jansi.Ansi.ansi
 
 /**
  * Created by brandstaetter on 08.02.14.
@@ -37,6 +37,8 @@ class ThreadedJenkinsMonitor {
         JenkinsMonitor checkThread = new JenkinsMonitor(queue, configuration)
         Broadcaster broadcaster = new Broadcaster(queue)
 
+        List<Thread> threadsNeedingInterruptOnQuit = new ArrayList<>()
+
         System.out.println("Press q followed by Enter to terminate");
 
         // multiplexer
@@ -52,6 +54,7 @@ class ThreadedJenkinsMonitor {
             final BlockingQueue<Message<JenkinsBuild>> queueForBlink = new LinkedBlockingQueue<Message<JenkinsBuild>>()
             Blink1Output blinkOutputThread = new Blink1Output(queueForBlink, configuration)
             broadcaster.addConsumer(queueForBlink)
+            threadsNeedingInterruptOnQuit.add(blinkOutputThread)
             blinkOutputThread.start()
         }
         if (configuration.getBoolean('runJansi', false)) {
@@ -77,6 +80,9 @@ class ThreadedJenkinsMonitor {
                 // send poison pill
                 checkThread.tellQuit()
                 checkThread.interrupt()
+                for (Thread thread : threadsNeedingInterruptOnQuit) {
+                    thread.interrupt()
+                }
                 queue.offer(new Message<JenkinsBuild>(JenkinsBuild.green, Message.MessageType.END))
                 break;
             }
@@ -135,7 +141,7 @@ class JenkinsMonitor extends Thread {
 
             try {
                 currentState = statusReport()
-                log.info(currentState.toString())
+                log.debug(currentState.toString())
             } catch (Exception e) {
                 currentState = JenkinsBuild.exception
                 log.error(currentState.toString(), e)
@@ -223,8 +229,12 @@ class Broadcaster extends Thread {
     public void run() {
         while (!quit) {
             Message<JenkinsBuild> consumed = null
-            while (consumed == null) {
-                consumed = queue.poll(2L, TimeUnit.SECONDS);
+            while (!interrupted() && consumed == null) {
+                try {
+                    consumed = queue.poll(2L, TimeUnit.SECONDS);
+                } catch (InterruptedException ignored) {
+                    consumed = null
+                }
             }
 
             for (BlockingQueue<Message<JenkinsBuild>> consumer : consumers) {
@@ -244,7 +254,7 @@ class Broadcaster extends Thread {
 }
 
 /** Consumer */
-abstract class  AbstractConsoleOutput extends Thread {
+abstract class AbstractConsoleOutput extends Thread {
     private static int buildsPerRow = 10
     private static int buildsPerSeparator = 5
     private static JenkinsBuild lastState
@@ -286,8 +296,12 @@ abstract class  AbstractConsoleOutput extends Thread {
 
         while (!quit) {
             Message<JenkinsBuild> consumed = null
-            while (consumed == null) {
-                consumed = queue.poll(2L, TimeUnit.SECONDS);
+            while (!interrupted() && consumed == null) {
+                try {
+                    consumed = queue.poll(2L, TimeUnit.SECONDS);
+                } catch (InterruptedException ignored) {
+                    consumed = null
+                }
             }
 
             // "poison pill"
@@ -305,7 +319,7 @@ abstract class  AbstractConsoleOutput extends Thread {
             }
             printCurrentState(sdfHour.format(currentTime), currentState)
             if ((counter % buildsPerRow) == 0) System.out.println();
-            if ((counter % buildsPerSeparator) == 0 && (counter % buildsPerRow) != 0) printSeperator()
+            if ((counter % buildsPerSeparator) == 0 && (counter % buildsPerRow) != 0) printSeparator()
             counter++
             if (!lastState.equals(currentState)) {
                 printStateChange(lastState, currentState, (currentTime.getTime() - lastStateChangeDate.getTime()) / (1000 * 60))
@@ -317,10 +331,15 @@ abstract class  AbstractConsoleOutput extends Thread {
     }
 
     protected abstract void printStartUp(String currentDay)
+
     protected abstract void printNewDay(String newDay)
+
     protected abstract void printCurrentState(String currentTime, JenkinsBuild currentState)
-    protected abstract void printSeperator()
+
+    protected abstract void printSeparator()
+
     protected abstract void printStateChange(JenkinsBuild lastState, JenkinsBuild currentState, double timeInMinutes)
+
     protected abstract void printTerminated()
 
 }
@@ -349,11 +368,11 @@ class ConsoleOutput extends AbstractConsoleOutput {
     @Override
     protected void printStateChange(JenkinsBuild lastState, JenkinsBuild currentState, double timeInMinutes) {
         System.out.println()
-        System.out.println("state change: $lastState -> $currentState, $lastState lasted for "+ timeInMinutes + " minutes");
+        System.out.println("state change: $lastState -> $currentState, $lastState lasted for " + timeInMinutes + " minutes");
     }
 
     @Override
-    protected void printSeperator() {
+    protected void printSeparator() {
         System.out.print(" ")
     }
 
@@ -370,17 +389,16 @@ class JansiOutput extends AbstractConsoleOutput {
     public JansiOutput(BlockingQueue<Message<JenkinsBuild>> queue, Configuration configuration) {
         super(queue, configuration)
         AnsiConsole.systemInstall();
-
     }
 
     @Override
     protected void printStartUp(String currentDay) {
-        System.out.println(ansi().eraseScreen().a(currentDay))
+        System.out.println(ansi().bg(BLACK).fg(WHITE).a(currentDay))
     }
 
     @Override
     protected void printNewDay(String newDay) {
-        System.out.println(ansi().bg(BLACK).fg(WHITE).a("\n\n"+sdfDay.format(currentDay)).reset())
+        System.out.println(ansi().bg(BLACK).fg(WHITE).a("\n\n" + sdfDay.format(currentDay)).reset())
     }
 
     @Override
@@ -408,25 +426,28 @@ class JansiOutput extends AbstractConsoleOutput {
             default:
                 translated = DEFAULT
         }
+        def fg = BLACK;
+        if (translated == BLUE) {
+            fg = WHITE
+        }
 
-
-        System.out.print(ansi().bg(translated).fg(BLACK).a(currentTime).reset())
+        System.out.print(ansi().bg(translated).fg(fg).a(currentTime).reset())
     }
 
     @Override
-    protected void printSeperator() {
+    protected void printSeparator() {
         System.out.print(ansi().bg(BLACK).a(" ").reset())
     }
 
     @Override
     protected void printStateChange(JenkinsBuild lastState, JenkinsBuild currentState, double timeInMinutes) {
-        log.info("state change: $lastState -> $currentState, $lastState lasted for "+ timeInMinutes + " minutes");
+        log.info("state change: $lastState -> $currentState, $lastState lasted for " + timeInMinutes + " minutes");
     }
 
     @Override
     protected void printTerminated() {
         AnsiConsole.systemUninstall();
-        System.out.print("Jansi Console terminated.")
+        System.out.println("Jansi Console terminated.")
     }
 }
 
@@ -462,8 +483,13 @@ class Blink1Output extends Thread {
         Blink1 blink1 = new Blink1();
 
         Message<JenkinsBuild> consumed
+        def closure = { quit = true }
         while (!quit) {
-            consumed = queue.poll(2L, TimeUnit.SECONDS);
+            try {
+                consumed = queue.poll(2L, TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
+                consumed = null
+            }
 
             // "poison pill"
             if (consumed != null && consumed.type == Message.MessageType.END) {
@@ -480,11 +506,17 @@ class Blink1Output extends Thread {
                     blink1.open();
                     blink1.fadeToRGB(blinkFadeTimeMillis, Color.black);
                     blink1.close();
-                    sleep(blinkFadeTimeMillis * 3)
+                    sleep(blinkFadeTimeMillis * 3, closure)
+                    if (quit) {
+                        break
+                    }
                     blink1.open();
                     blink1.fadeToRGB(blinkFadeTimeMillis, currentState.c);
                     blink1.close();
-                    sleep(blinkFadeTimeMillis * 3)
+                    sleep(blinkFadeTimeMillis * 3, closure)
+                    if (quit) {
+                        break
+                    }
                 } else {
                     blink1.open();
                     blink1.fadeToRGB(blinkFadeTimeMillis, currentState.c);
