@@ -244,8 +244,6 @@ class Broadcaster extends Thread {
 }
 
 /** Consumer */
-
-/** Consumer */
 abstract class  AbstractConsoleOutput extends Thread {
     private static int buildsPerRow = 10
     private static int buildsPerSeparator = 5
@@ -381,42 +379,42 @@ class JansiOutput extends AbstractConsoleOutput {
 
     @Override
     protected void printNewDay(String newDay) {
-        System.out.println(ansi().bg(org.fusesource.jansi.Ansi.Color.BLACK).fg(org.fusesource.jansi.Ansi.Color.WHITE).a("\n\n"+sdfDay.format(currentDay)).reset())
+        System.out.println(ansi().bg(BLACK).fg(WHITE).a("\n\n"+sdfDay.format(currentDay)).reset())
     }
 
     @Override
     protected void printCurrentState(String currentTime, JenkinsBuild currentState) {
-        org.fusesource.jansi.Ansi.Color  translated;
+        def translated;
         switch (currentState.c) {
             case Color.GREEN:
-                translated =org.fusesource.jansi.Ansi.Color.GREEN;
+                translated = GREEN;
                 break;
             case Color.YELLOW:
-                translated = org.fusesource.jansi.Ansi.Color.YELLOW;
+                translated = YELLOW;
                 break;
             case Color.RED:
-                translated = org.fusesource.jansi.Ansi.Color.RED;
+                translated = RED;
                 break;
             case Color.WHITE:
-                translated = org.fusesource.jansi.Ansi.Color.WHITE;
+                translated = WHITE;
                 break;
             case Color.CYAN:
-                translated = org.fusesource.jansi.Ansi.Color.CYAN;
+                translated = CYAN;
                 break;
             case Color.BLUE:
-                translated = org.fusesource.jansi.Ansi.Color.BLUE;
+                translated = BLUE;
                 break;
             default:
-                translated = org.fusesource.jansi.Ansi.Color.DEFAULT
+                translated = DEFAULT
         }
 
 
-        System.out.print(ansi().bg(translated).fg(org.fusesource.jansi.Ansi.Color.BLACK).a(currentTime).reset())
+        System.out.print(ansi().bg(translated).fg(BLACK).a(currentTime).reset())
     }
 
     @Override
     protected void printSeperator() {
-        System.out.print(ansi().bg(org.fusesource.jansi.Ansi.Color.BLACK).a(" ").reset())
+        System.out.print(ansi().bg(BLACK).a(" ").reset())
     }
 
     @Override
