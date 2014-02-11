@@ -1,9 +1,15 @@
 package net.brandstaetter.jenkinsmonitor
 
 import groovy.json.JsonSlurper
+import org.apache.commons.configuration.Configuration
+import org.apache.commons.configuration.PropertiesConfiguration
+import org.fusesource.jansi.AnsiConsole
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import thingm.blink1.Blink1
+
+import static org.fusesource.jansi.Ansi.ansi;
+import static org.fusesource.jansi.Ansi.Color.*;
 
 import java.awt.*
 import java.text.SimpleDateFormat
@@ -18,12 +24,7 @@ import java.util.concurrent.TimeUnit
 class ThreadedJenkinsMonitor {
 
     public static void main(String... args) {
-        Properties properties = new Properties()
-        File propertiesFile = new File('settings.properties')
-        if (!propertiesFile.exists()) {
-            properties.store(new FileOutputStream(propertiesFile), null)
-        }
-        properties.load new FileInputStream(propertiesFile)
+        Configuration configuration = new PropertiesConfiguration("jenkins_monitor_settings.properties");
 
         final BlockingQueue<Message<JenkinsBuild>> queue = new LinkedBlockingQueue<Message<JenkinsBuild>>()
 
@@ -33,27 +34,31 @@ class ThreadedJenkinsMonitor {
                 queue.offer(new Message<JenkinsBuild>(JenkinsBuild.green, Message.MessageType.END))
             }
         });
-        JenkinsMonitor checkThread = new JenkinsMonitor(queue)
+        JenkinsMonitor checkThread = new JenkinsMonitor(queue, configuration)
         Broadcaster broadcaster = new Broadcaster(queue)
-
-
 
         System.out.println("Press q followed by Enter to terminate");
 
         // multiplexer
         broadcaster.start()
         // consumers
-        if (properties.getProperty('runConsole', 'true').equalsIgnoreCase('true')) {
+        if (configuration.getBoolean('runConsole', true)) {
             final BlockingQueue<Message<JenkinsBuild>> queueForConsole = new LinkedBlockingQueue<Message<JenkinsBuild>>()
-            ConsoleOutput consoleOutputThread = new ConsoleOutput(queueForConsole)
+            ConsoleOutput consoleOutputThread = new ConsoleOutput(queueForConsole, configuration)
             broadcaster.addConsumer(queueForConsole)
             consoleOutputThread.start()
         }
-        if (properties.getProperty('runBlink', 'false').equalsIgnoreCase('true')) {
+        if (configuration.getBoolean('runBlink', false)) {
             final BlockingQueue<Message<JenkinsBuild>> queueForBlink = new LinkedBlockingQueue<Message<JenkinsBuild>>()
-            Blink1Output blinkOutputThread = new Blink1Output(queueForBlink)
+            Blink1Output blinkOutputThread = new Blink1Output(queueForBlink, configuration)
             broadcaster.addConsumer(queueForBlink)
             blinkOutputThread.start()
+        }
+        if (configuration.getBoolean('runJansi', false)) {
+            final BlockingQueue<Message<JenkinsBuild>> queueForJansi = new LinkedBlockingQueue<Message<JenkinsBuild>>()
+            JansiOutput jansiOutputThread = new JansiOutput(queueForJansi, configuration)
+            broadcaster.addConsumer(queueForJansi)
+            jansiOutputThread.start()
         }
 
         // producer
@@ -76,9 +81,6 @@ class ThreadedJenkinsMonitor {
                 break;
             }
         }
-        properties.setProperty('runConsole', 'true')
-        properties.setProperty('runBlink', 'false')
-        properties.store(new FileOutputStream(propertiesFile), null)
     }
 }
 
@@ -102,34 +104,27 @@ class JenkinsMonitor extends Thread {
     private final BlockingQueue<Message<JenkinsBuild>> queue
     private boolean quit;
 
-    public JenkinsMonitor(final BlockingQueue<Message<JenkinsBuild>> queue) {
+    public JenkinsMonitor(final BlockingQueue<Message<JenkinsBuild>> queue, Configuration configuration) {
         this.queue = queue;
         this.quit = false
 
-        Properties properties = new Properties()
-        File propertiesFile = new File('settings.properties')
-        if (!propertiesFile.exists()) {
-            properties.store(new FileOutputStream(propertiesFile), null)
-        }
-        properties.load new FileInputStream(propertiesFile)
-
-        if (!properties.stringPropertyNames().contains("mainUrl")
-                || !properties.stringPropertyNames().contains("basicAuthentication")
-                || !properties.stringPropertyNames().contains("interestingBuildsList")) {
+        if (!configuration.containsKey("mainUrl")
+                || !configuration.containsKey("basicAuthentication")
+                || !configuration.containsKey("interestingBuildsList")) {
             // die, consumers.
             queue.offer(new Message<JenkinsBuild>(JenkinsBuild.green, Message.MessageType.END))
             throw new RuntimeException("mainUrl, basicAuthentication and interestingBuildsList have to be configured in settings.properties!")
         }
         try {
-            millisForNextCheck = Long.parseLong(properties.getProperty("millisForNextCheck", "60000"))
+            millisForNextCheck = configuration.getLong("millisForNextCheck", 60000L)
         } catch (NumberFormatException ignored) {
             millisForNextCheck = 60000 //60*1000ms = 1 minute
         }
 
-        mainUrl = properties.getProperty("mainUrl").trim()
-        basicAuthentication = properties.getProperty("basicAuthentication").trim()
-        interestingBuildsList = properties.getProperty("interestingBuildsList")
-        animIfBuildingList = properties.getProperty("animIfBuildingList", '[]')
+        mainUrl = configuration.getString("mainUrl").trim()
+        basicAuthentication = configuration.getString("basicAuthentication").trim()
+        interestingBuildsList = configuration.getString("interestingBuildsList")
+        animIfBuildingList = configuration.getString("animIfBuildingList", '[]')
     }
 
     @Override
@@ -249,7 +244,9 @@ class Broadcaster extends Thread {
 }
 
 /** Consumer */
-class ConsoleOutput extends Thread {
+
+/** Consumer */
+abstract class  AbstractConsoleOutput extends Thread {
     private static int buildsPerRow = 10
     private static int buildsPerSeparator = 5
     private static JenkinsBuild lastState
@@ -258,24 +255,17 @@ class ConsoleOutput extends Thread {
     private final BlockingQueue<Message<JenkinsBuild>> queue
     private boolean quit;
 
-    public ConsoleOutput(final BlockingQueue<Message<JenkinsBuild>> queue) {
+    public AbstractConsoleOutput(final BlockingQueue<Message<JenkinsBuild>> queue, Configuration configuration) {
         this.queue = queue;
         this.quit = false;
 
-        Properties properties = new Properties()
-        File propertiesFile = new File('settings.properties')
-        if (!propertiesFile.exists()) {
-            properties.store(new FileOutputStream(propertiesFile), null)
-        }
-        properties.load new FileInputStream(propertiesFile)
-
         try {
-            buildsPerRow = Integer.parseInt(properties.getProperty("buildsPerRow", "10"))
+            buildsPerRow = configuration.getInt("buildsPerRow", 10)
         } catch (NumberFormatException ignored) {
             buildsPerRow = 10
         }
         try {
-            buildsPerSeparator = Integer.parseInt(properties.getProperty("buildsPerSeparator", "5"))
+            buildsPerSeparator = configuration.getInt("buildsPerSeparator", 5)
         } catch (NumberFormatException ignored) {
             buildsPerSeparator = 5
         }
@@ -294,7 +284,7 @@ class ConsoleOutput extends Thread {
         long counter = 1
         Date lastStateChangeDate = new Date();
 
-        System.out.println(sdfDay.format(currentDay));
+        printStartUp(sdfDay.format(currentDay));
 
         while (!quit) {
             Message<JenkinsBuild> consumed = null
@@ -313,21 +303,130 @@ class ConsoleOutput extends Thread {
             if (currentDay.getDay() != currentTime.getDay()) {
                 currentDay = currentTime
                 counter = 1
-                System.out.println("\n\n" + sdfDay.format(currentDay))
+                printNewDay(sdfDay.format(currentDay))
             }
-            System.out.print(sdfHour.format(currentTime) + currentState.s + " ")
+            printCurrentState(sdfHour.format(currentTime), currentState)
             if ((counter % buildsPerRow) == 0) System.out.println();
-            if ((counter % buildsPerSeparator) == 0 && (counter % buildsPerRow) != 0) System.out.print(" ")
+            if ((counter % buildsPerSeparator) == 0 && (counter % buildsPerRow) != 0) printSeperator()
             counter++
             if (!lastState.equals(currentState)) {
-                System.out.println()
-                System.out.println("state change: $lastState -> $currentState, $lastState lasted for "
-                        + (currentTime.getTime() - lastStateChangeDate.getTime()) / (1000 * 60) + " minutes");
+                printStateChange(lastState, currentState, (currentTime.getTime() - lastStateChangeDate.getTime()) / (1000 * 60))
                 lastState = currentState;
                 lastStateChangeDate = currentTime
             }
         }
+        printTerminated()
+    }
+
+    protected abstract void printStartUp(String currentDay)
+    protected abstract void printNewDay(String newDay)
+    protected abstract void printCurrentState(String currentTime, JenkinsBuild currentState)
+    protected abstract void printSeperator()
+    protected abstract void printStateChange(JenkinsBuild lastState, JenkinsBuild currentState, double timeInMinutes)
+    protected abstract void printTerminated()
+
+}
+
+class ConsoleOutput extends AbstractConsoleOutput {
+
+    public ConsoleOutput(BlockingQueue<Message<JenkinsBuild>> queue, Configuration configuration) {
+        super(queue, configuration)
+    }
+
+    @Override
+    protected void printStartUp(String currentDay) {
+        System.out.println(currentDay)
+    }
+
+    @Override
+    protected void printNewDay(String newDay) {
+        System.out.println("\n\n" + sdfDay.format(currentDay));
+    }
+
+    @Override
+    protected void printCurrentState(String currentTime, JenkinsBuild currentState) {
+        System.out.print(currentTime + currentState.s + " ")
+    }
+
+    @Override
+    protected void printStateChange(JenkinsBuild lastState, JenkinsBuild currentState, double timeInMinutes) {
+        System.out.println()
+        System.out.println("state change: $lastState -> $currentState, $lastState lasted for "+ timeInMinutes + " minutes");
+    }
+
+    @Override
+    protected void printSeperator() {
+        System.out.print(" ")
+    }
+
+    @Override
+    protected void printTerminated() {
         System.out.println("Console Output terminated.")
+    }
+}
+
+/** Consumer */
+class JansiOutput extends AbstractConsoleOutput {
+
+    public JansiOutput(BlockingQueue<Message<JenkinsBuild>> queue, Configuration configuration) {
+        super(queue, configuration)
+        AnsiConsole.systemInstall();
+
+    }
+
+    @Override
+    protected void printStartUp(String currentDay) {
+        System.out.println(ansi().eraseScreen().a(currentDay))
+    }
+
+    @Override
+    protected void printNewDay(String newDay) {
+        System.out.println(ansi().bg(org.fusesource.jansi.Ansi.Color.BLACK).fg(org.fusesource.jansi.Ansi.Color.WHITE).a("\n\n"+sdfDay.format(currentDay)).reset())
+    }
+
+    @Override
+    protected void printCurrentState(String currentTime, JenkinsBuild currentState) {
+        org.fusesource.jansi.Ansi.Color  translated;
+        switch (currentState.c) {
+            case Color.GREEN:
+                translated =org.fusesource.jansi.Ansi.Color.GREEN;
+                break;
+            case Color.YELLOW:
+                translated = org.fusesource.jansi.Ansi.Color.YELLOW;
+                break;
+            case Color.RED:
+                translated = org.fusesource.jansi.Ansi.Color.RED;
+                break;
+            case Color.WHITE:
+                translated = org.fusesource.jansi.Ansi.Color.WHITE;
+                break;
+            case Color.CYAN:
+                translated = org.fusesource.jansi.Ansi.Color.CYAN;
+                break;
+            case Color.BLUE:
+                translated = org.fusesource.jansi.Ansi.Color.BLUE;
+                break;
+            default:
+                translated = org.fusesource.jansi.Ansi.Color.DEFAULT
+        }
+
+
+        System.out.print(ansi().bg(translated).fg(org.fusesource.jansi.Ansi.Color.BLACK).a(currentTime).reset())
+    }
+
+    @Override
+    protected void printSeperator() {
+        System.out.print(ansi().bg(org.fusesource.jansi.Ansi.Color.BLACK).a(" ").reset())
+    }
+
+    @Override
+    protected void printStateChange(JenkinsBuild lastState, JenkinsBuild currentState, double timeInMinutes) {
+        //To change body of implemented methods use File | Settings | File Templates.
+    }
+
+    @Override
+    protected void printTerminated() {
+        AnsiConsole.systemUninstall();
     }
 }
 
@@ -340,18 +439,12 @@ class Blink1Output extends Thread {
     private final BlockingQueue<Message<JenkinsBuild>> queue
     private boolean quit;
 
-    public Blink1Output(final BlockingQueue<Message<JenkinsBuild>> queue) {
+    public Blink1Output(final BlockingQueue<Message<JenkinsBuild>> queue, Configuration configuration) {
         this.queue = queue;
         this.quit = false;
 
-        Properties properties = new Properties()
-        File propertiesFile = new File('settings.properties')
-        if (!propertiesFile.exists()) {
-            properties.store(new FileOutputStream(propertiesFile), null)
-        }
-        properties.load new FileInputStream(propertiesFile)
         try {
-            blinkFadeTimeMillis = Integer.parseInt(properties.getProperty("blinkFadeTimeMillis", "1000"))
+            blinkFadeTimeMillis = configuration.getInt("blinkFadeTimeMillis", 1000)
         } catch (NumberFormatException ignored) {
             blinkFadeTimeMillis = 1000
         }
