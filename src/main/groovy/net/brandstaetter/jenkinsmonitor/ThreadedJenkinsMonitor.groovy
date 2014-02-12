@@ -498,7 +498,10 @@ class Blink1Output extends Thread {
                 break;
             }
             currentState = consumed != null ? consumed.message : currentState
-
+            Color col = currentState.c
+            if (col == Color.yellow) {
+                col = Color.orange
+            }
             blink1.enumerate();
 
             if (blink1.getCount() > 0) {
@@ -511,7 +514,7 @@ class Blink1Output extends Thread {
                         break
                     }
                     blink1.open();
-                    blink1.fadeToRGB(blinkFadeTimeMillis, currentState.c);
+                    blink1.fadeToRGB(blinkFadeTimeMillis, col);
                     blink1.close();
                     sleep(blinkFadeTimeMillis * 3, closure)
                     if (quit) {
@@ -519,7 +522,7 @@ class Blink1Output extends Thread {
                     }
                 } else {
                     blink1.open();
-                    blink1.fadeToRGB(blinkFadeTimeMillis, currentState.c);
+                    blink1.fadeToRGB(blinkFadeTimeMillis, col);
                     blink1.close();
                 }
             }
