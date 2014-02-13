@@ -9,9 +9,16 @@ A modular threaded monitor application for jenkins jobs
 How to run:
 
 * clone this repo
-* adapt the `gradle.properties` and `runme.bat` to point to your correct JDK path
-* create a `jenkins_monitor_settings.properties` where you set the required properties and can overwrite some default values (see `src/main/resources/jenkins_monitor_settings.properties`)
-* execute `runme.bat`
+* adapt `runme.bat` to point to your correct JDK path (32 bit if using blink(1), otherwise it does not matter)
+* create a `jenkins_monitor_settings.properties` in your home directory where you set the required properties
+ and can overwrite some default values (see `src/main/resources/jenkins_monitor_settings.properties`)
+ ```
+ mainUrl= < your jenkins url >
+ basicAuthentication= < the basic auth string >
+ interestingBuildsList=['build_name_1'\,'build_name_2'\,'build_name_3'] < the list of builds to watch, separated by "\," >
+ animIfBuildingList=['build_name_1'\,'build_name_2'] < used for blink(1) >
+ ```
+* execute `runme.bat` or `gradlew install` and `build/install/JenkinsMonitor/bin/JenkinsMonitor`
 
 
 Notes:
