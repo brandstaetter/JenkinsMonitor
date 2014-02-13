@@ -20,7 +20,7 @@ How to run:
  animIfBuildingList=['build_name_1'\,'build_name_2'] #used e.g. for blink(1) to pulse LED for these jobs while building
  ```
 
- ** Building a basic auth string:
+ * Building a basic auth string:
  Take your credentials (<<user>>:<<passwort>>) and encode them with base64 (e.g. http://www.base64encode.org/).
  Example: "myuser:mypassword" -> bXl1c2VyOm15cGFzc3dvcmQ=
 
