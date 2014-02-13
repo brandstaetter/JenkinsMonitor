@@ -31,4 +31,6 @@ Notes:
 
 If you want to use a [blink(1) USB Dongle](http://thingm.com/products/blink-1/), you need to use a 32 bit Java version.
 
+If you want to run it on a RaspberryPi, you need to install the native library wiringPi (http://wiringpi.com/download-and-install/) and run the monitor with sudo. The both used Pins are GPIO 23/24 (numbering scheme from http://elinux.org/RPi_Low-level_peripherals).
+
 If you have suggestions, feel free to file an issue or submit a pull request!
