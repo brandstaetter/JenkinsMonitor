@@ -12,12 +12,14 @@ How to run:
 * adapt `runme.bat` to point to your correct JDK path (32 bit if using blink(1), otherwise it does not matter)
 * create a `jenkins_monitor_settings.properties` in your home directory where you set the required properties
  and can overwrite some default values (see `src/main/resources/jenkins_monitor_settings.properties`)
+
  ```
- mainUrl= < your jenkins url >
- basicAuthentication= < the basic auth string >
- interestingBuildsList=['build_name_1'\,'build_name_2'\,'build_name_3'] < the list of builds to watch, separated by "\," >
- animIfBuildingList=['build_name_1'\,'build_name_2'] < used for blink(1) >
+ mainUrl= #< your jenkins url >
+ basicAuthentication= #< the basic auth string >
+ interestingBuildsList=['build_name_1'\,'build_name_2'\,'build_name_3'] #the list of builds to watch, separated by "\,"
+ animIfBuildingList=['build_name_1'\,'build_name_2'] #used e.g. for blink(1) to pulse LED for these jobs while building
  ```
+
 * execute `runme.bat` or `gradlew install` and `build/install/JenkinsMonitor/bin/JenkinsMonitor`
 
 
