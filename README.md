@@ -1,6 +1,8 @@
 JenkinsMonitor
 ==============
 
+[![Build Status](https://travis-ci.org/brandstaetter/JenkinsMonitor.png?branch=master)](https://travis-ci.org/brandstaetter/JenkinsMonitor)
+
 A modular threaded monitor application for jenkins jobs
 
 
