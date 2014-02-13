@@ -25,7 +25,6 @@ run {
 }
 
 dependencies {
-    compile files('./libs/blink1.jar')
     compile 'org.fusesource.jansi:jansi:1.11'
     compile 'org.codehaus.groovy:groovy-all:2.1.6:indy'
     compile 'org.jsoup:jsoup:1.7.2'
