@@ -56,7 +56,7 @@ class JansiOutput extends AbstractConsoleOutput {
                 translated = Ansi.Color.DEFAULT
         }
         def fg = Ansi.Color.BLACK;
-        if (translated == Ansi.Color.BLUE) {
+        if (translated == Ansi.Color.BLUE || currentState.blinking) {
             fg = Ansi.Color.WHITE
         }
 
