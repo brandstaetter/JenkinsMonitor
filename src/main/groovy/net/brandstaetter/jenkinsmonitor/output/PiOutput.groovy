@@ -1,10 +1,6 @@
 package net.brandstaetter.jenkinsmonitor.output
 
-import com.pi4j.io.gpio.GpioController
-import com.pi4j.io.gpio.GpioFactory
-import com.pi4j.io.gpio.GpioPinDigitalOutput
-import com.pi4j.io.gpio.PinState
-import com.pi4j.io.gpio.RaspiPin
+import com.pi4j.io.gpio.*
 import net.brandstaetter.jenkinsmonitor.JenkinsBuild
 import net.brandstaetter.jenkinsmonitor.Message
 import org.apache.commons.configuration.Configuration
@@ -35,7 +31,7 @@ class PiOutput extends AbstractConsoleOutput {
 
     @Override
     protected void printStartUp(String currentDay) {
-        //To change body of implemented methods use File | Settings | File Templates.
+        // do nothing
     }
 
     @Override
@@ -43,9 +39,9 @@ class PiOutput extends AbstractConsoleOutput {
         // do nothing
     }
 
+    @SuppressWarnings("GroovyFallthrough")
     @Override
     protected void printCurrentState(String currentTime, JenkinsBuild currentState) {
-        //To change body of implemented methods use File | Settings | File Templates.
         switch (currentState) {
             case JenkinsBuild.green_anim:
                 buildingFuture = doBlink(buildingPin)
@@ -59,7 +55,6 @@ class PiOutput extends AbstractConsoleOutput {
                 break;
             case JenkinsBuild.gray_anim:
             case JenkinsBuild.red_anim:
-
                 buildingFuture = doBlink(buildingPin)
             default:
                 statusPin.low();
@@ -72,6 +67,7 @@ class PiOutput extends AbstractConsoleOutput {
         //do nothing
     }
 
+    @SuppressWarnings("GroovyFallthrough")
     @Override
     protected void printStateChange(JenkinsBuild lastState, JenkinsBuild currentState, double timeInMinutes) {
         switch(lastState) {
@@ -91,11 +87,11 @@ class PiOutput extends AbstractConsoleOutput {
         resetFuture(statusFuture)
     }
 
-    private void resetFuture(Future<?> f) {
+    private static void resetFuture(Future<?> f) {
         if (f!=null) f.cancel(true)
     }
 
-    private Future<?> doBlink(GpioPinDigitalOutput pin) {
+    private static Future<?> doBlink(GpioPinDigitalOutput pin) {
         return pin.blink(1,1000)
     }
 }

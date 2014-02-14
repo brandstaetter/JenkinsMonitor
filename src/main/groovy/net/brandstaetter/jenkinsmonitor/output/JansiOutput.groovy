@@ -8,7 +8,7 @@ import org.fusesource.jansi.AnsiConsole
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
-import java.awt.Color
+import java.awt.*
 import java.util.concurrent.BlockingQueue
 
 /** Consumer */
@@ -27,7 +27,7 @@ class JansiOutput extends AbstractConsoleOutput {
 
     @Override
     protected void printNewDay(String newDay) {
-        System.out.println(Ansi.ansi().bg(Ansi.Color.BLACK).fg(Ansi.Color.WHITE).a("\n\n" + sdfDay.format(currentDay)).reset())
+        System.out.println(Ansi.ansi().bg(Ansi.Color.BLACK).fg(Ansi.Color.WHITE).a("\n\n" + newDay).reset())
     }
 
     @Override

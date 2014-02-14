@@ -19,7 +19,7 @@ public class ConsoleOutput extends AbstractConsoleOutput {
 
     @Override
     protected void printNewDay(String newDay) {
-        System.out.println("\n\n" + sdfDay.format(currentDay));
+        System.out.println("\n\n" + newDay);
     }
 
     @Override
