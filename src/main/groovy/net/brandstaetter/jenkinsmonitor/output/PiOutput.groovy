@@ -66,7 +66,8 @@ class PiOutput extends AbstractConsoleOutput {
 
     @Override
     protected void printSeparator() {
-        //do nothing
+        //shutdown gpio
+        GpioFactory.getInstance().shutdown()
     }
 
     @SuppressWarnings("GroovyFallthrough")
@@ -93,8 +94,8 @@ class PiOutput extends AbstractConsoleOutput {
         if (f!=null) f.cancel(true)
     }
 
-    private static Future<?> doBlink(GpioPinDigitalOutput pin) {
-        return pin.blink(1,1000)
+    private Future<?> doBlink(GpioPinDigitalOutput pin) {
+        return pin.blink(1000)
     }
 }
 
