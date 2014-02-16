@@ -2,6 +2,7 @@ package net.brandstaetter.jenkinsmonitor.output
 
 import net.brandstaetter.jenkinsmonitor.JenkinsBuild
 import net.brandstaetter.jenkinsmonitor.Message
+import net.brandstaetter.jenkinsmonitor.ThreadedJenkinsMonitor
 import org.apache.commons.configuration.Configuration
 
 import java.text.SimpleDateFormat
@@ -15,12 +16,15 @@ abstract class AbstractConsoleOutput extends Thread {
     private static JenkinsBuild lastState
     private static JenkinsBuild currentState
 
-    private final BlockingQueue<Message<JenkinsBuild>> queue
+    private final BlockingQueue<Message<Map<String, JenkinsBuild>>> queue
+    private final Configuration configuration
     private boolean quit;
 
-    public AbstractConsoleOutput(final BlockingQueue<Message<JenkinsBuild>> queue, Configuration configuration) {
+    public AbstractConsoleOutput(
+            final BlockingQueue<Message<Map<String, JenkinsBuild>>> queue, Configuration configuration) {
         this.queue = queue;
         this.quit = false;
+        this.configuration = configuration
 
         try {
             buildsPerRow = configuration.getInt("buildsPerRow", 10)
@@ -50,7 +54,7 @@ abstract class AbstractConsoleOutput extends Thread {
         printStartUp(sdfDay.format(currentDay));
 
         while (!quit) {
-            Message<JenkinsBuild> consumed = null
+            Message<Map<String, JenkinsBuild>> consumed = null
             while (!interrupted() && consumed == null) {
                 try {
                     consumed = queue.poll(2L, TimeUnit.SECONDS);
@@ -65,8 +69,9 @@ abstract class AbstractConsoleOutput extends Thread {
                 tellQuit()
                 break;
             }
-            currentState = consumed.message
+            currentState = ThreadedJenkinsMonitor.getSimpleResult(consumed.message, configuration)
             Date currentTime = new Date()
+            //noinspection GrDeprecatedAPIUsage
             if (currentDay.getDay() != currentTime.getDay()) {
                 currentDay = currentTime
                 counter = 1

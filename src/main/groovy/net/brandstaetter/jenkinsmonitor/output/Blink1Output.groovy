@@ -2,10 +2,11 @@ package net.brandstaetter.jenkinsmonitor.output
 
 import net.brandstaetter.jenkinsmonitor.JenkinsBuild
 import net.brandstaetter.jenkinsmonitor.Message
+import net.brandstaetter.jenkinsmonitor.ThreadedJenkinsMonitor
 import org.apache.commons.configuration.Configuration
 import thingm.blink1.Blink1
 
-import java.awt.Color
+import java.awt.*
 import java.util.concurrent.BlockingQueue
 import java.util.concurrent.TimeUnit
 
@@ -15,11 +16,13 @@ class Blink1Output extends Thread {
     private static JenkinsBuild lastState
     private static JenkinsBuild currentState
 
-    private final BlockingQueue<Message<JenkinsBuild>> queue
+    private final BlockingQueue<Message<Map<String, JenkinsBuild>>> queue
+    private final Configuration configuration
     private boolean quit;
 
-    public Blink1Output(final BlockingQueue<Message<JenkinsBuild>> queue, Configuration configuration) {
+    public Blink1Output(final BlockingQueue<Message<Map<String, JenkinsBuild>>> queue, Configuration configuration) {
         this.queue = queue;
+        this.configuration = configuration
         this.quit = false;
 
         try {
@@ -40,7 +43,7 @@ class Blink1Output extends Thread {
 
         Blink1 blink1 = new Blink1();
 
-        Message<JenkinsBuild> consumed
+        Message<Map<String, JenkinsBuild>> consumed
         def closure = { quit = true }
         while (!quit) {
             try {
@@ -55,7 +58,7 @@ class Blink1Output extends Thread {
                 tellQuit()
                 break;
             }
-            currentState = consumed != null ? consumed.message : currentState
+            currentState = consumed != null ? ThreadedJenkinsMonitor.getSimpleResult(consumed.message, configuration) : currentState
             Color col = currentState.c
             if (col == Color.yellow) {
                 col = Color.orange

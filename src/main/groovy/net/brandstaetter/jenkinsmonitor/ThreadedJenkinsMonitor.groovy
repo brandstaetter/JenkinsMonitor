@@ -1,7 +1,10 @@
 package net.brandstaetter.jenkinsmonitor
 
 import groovy.json.JsonSlurper
-import net.brandstaetter.jenkinsmonitor.output.*
+import net.brandstaetter.jenkinsmonitor.output.Blink1Output
+import net.brandstaetter.jenkinsmonitor.output.ConsoleOutput
+import net.brandstaetter.jenkinsmonitor.output.JansiOutput
+import net.brandstaetter.jenkinsmonitor.output.PiOutput
 import org.apache.commons.configuration.Configuration
 import org.apache.commons.configuration.PropertiesConfiguration
 import org.slf4j.Logger
@@ -21,16 +24,17 @@ class ThreadedJenkinsMonitor {
     public static void main(String... args) {
         Configuration configuration = new PropertiesConfiguration("jenkins_monitor_settings.properties");
 
-        final BlockingQueue<Message<JenkinsBuild>> queue = new LinkedBlockingQueue<Message<JenkinsBuild>>()
+        final BlockingQueue<Message<Map<String, JenkinsBuild>>> queue = new LinkedBlockingQueue<Message<Map<String, JenkinsBuild>>>()
 
         Runtime.getRuntime().addShutdownHook(new Thread() {
+            @Override
             public void run() {
                 // send poison pill
-                queue.offer(new Message<JenkinsBuild>(JenkinsBuild.green, Message.MessageType.END))
+                queue.offer(new Message<Map<String, JenkinsBuild>>())
             }
         });
         JenkinsMonitor checkThread = new JenkinsMonitor(queue, configuration)
-        Broadcaster broadcaster = new Broadcaster(queue)
+        Broadcaster broadcaster = new Broadcaster<Map<String, JenkinsBuild>>(queue)
 
         List<Thread> threadsNeedingInterruptOnQuit = new ArrayList<>()
 
@@ -40,26 +44,26 @@ class ThreadedJenkinsMonitor {
         broadcaster.start()
         // consumers
         if (configuration.getBoolean('runConsole', true)) {
-            final BlockingQueue<Message<JenkinsBuild>> queueForConsole = new LinkedBlockingQueue<Message<JenkinsBuild>>()
+            final BlockingQueue<Message<Map<String, JenkinsBuild>>> queueForConsole = new LinkedBlockingQueue<Message<Map<String, JenkinsBuild>>>()
             ConsoleOutput consoleOutputThread = new ConsoleOutput(queueForConsole, configuration)
             broadcaster.addConsumer(queueForConsole)
             consoleOutputThread.start()
         }
         if (configuration.getBoolean('runBlink', false)) {
-            final BlockingQueue<Message<JenkinsBuild>> queueForBlink = new LinkedBlockingQueue<Message<JenkinsBuild>>()
+            final BlockingQueue<Message<Map<String, JenkinsBuild>>> queueForBlink = new LinkedBlockingQueue<Message<Map<String, JenkinsBuild>>>()
             Blink1Output blinkOutputThread = new Blink1Output(queueForBlink, configuration)
             broadcaster.addConsumer(queueForBlink)
             threadsNeedingInterruptOnQuit.add(blinkOutputThread)
             blinkOutputThread.start()
         }
         if (configuration.getBoolean('runJansi', false)) {
-            final BlockingQueue<Message<JenkinsBuild>> queueForJansi = new LinkedBlockingQueue<Message<JenkinsBuild>>()
+            final BlockingQueue<Message<Map<String, JenkinsBuild>>> queueForJansi = new LinkedBlockingQueue<Message<Map<String, JenkinsBuild>>>()
             JansiOutput jansiOutputThread = new JansiOutput(queueForJansi, configuration)
             broadcaster.addConsumer(queueForJansi)
             jansiOutputThread.start()
         }
         if (configuration.getBoolean('runPi', false)) {
-            final BlockingQueue<Message<JenkinsBuild>> queueForPi = new LinkedBlockingQueue<Message<JenkinsBuild>>();
+            final BlockingQueue<Message<Map<String, JenkinsBuild>>> queueForPi = new LinkedBlockingQueue<Message<Map<String, JenkinsBuild>>>();
             PiOutput piOutputThread = new PiOutput(queueForPi, configuration)
             broadcaster.addConsumer(queueForPi)
             piOutputThread.start()
@@ -73,7 +77,7 @@ class ThreadedJenkinsMonitor {
         while (true) {
             try {
                 msg = reader.readLine();
-            } catch (Exception e) {
+            } catch (Exception ignored) {
                 msg = "continue"
             }
 
@@ -84,10 +88,45 @@ class ThreadedJenkinsMonitor {
                 for (Thread thread : threadsNeedingInterruptOnQuit) {
                     thread.interrupt()
                 }
-                queue.offer(new Message<JenkinsBuild>(JenkinsBuild.green, Message.MessageType.END))
+                queue.offer(new Message<Map<String, JenkinsBuild>>())
                 break;
             }
         }
+    }
+
+    static JenkinsBuild getSimpleResult(Map<String, JenkinsBuild> map, Configuration config) {
+
+        if (map.containsKey("ERROR") && map.get("ERROR") == JenkinsBuild.exception) {
+            return JenkinsBuild.exception
+        }
+        String interestingBuildsList = config.getString("interestingBuildsList")
+        String animIfBuildingList = config.getString("animIfBuildingList", '[]')
+
+        def interestingBuilds = Eval.me(interestingBuildsList)
+        def animIfBuilding = Eval.me(animIfBuildingList)
+        def missingJobs = new ArrayList<>((Collection) interestingBuilds)
+
+        def greenAnim = false
+        for (def job : map.entrySet()) {
+            if (job.key.trim().toLowerCase() in interestingBuilds) {
+                missingJobs.remove(job.key.trim().toLowerCase())
+                if (job.value.c != Color.green) {
+                    return job.value
+                }
+            }
+            if (job.key.trim().toLowerCase() in animIfBuilding) {
+                if (job.value.c == Color.green && job.value.blinking) {
+                    greenAnim = true
+                }
+            }
+        }
+        if (missingJobs.isEmpty()) {
+            if (greenAnim) {
+                return JenkinsBuild.green_anim
+            }
+            return JenkinsBuild.green
+        }
+        return JenkinsBuild.missing
     }
 }
 
@@ -100,6 +139,7 @@ class JenkinsMonitor extends Thread {
     static List<String> failingAnimColors = ["red_anime"]
     static List<String> unstableColors = ["yellow"]
     static List<String> unstableAnimColors = ["yellow_anime"]
+    static List<String> successColors = ["blue"]
     static List<String> successAnimColors = ["blue_anime"]
 
     private static String mainUrl
@@ -108,10 +148,10 @@ class JenkinsMonitor extends Thread {
     private static String animIfBuildingList
 
     private static long millisForNextCheck
-    private final BlockingQueue<Message<JenkinsBuild>> queue
+    private final BlockingQueue<Message<Map<String, JenkinsBuild>>> queue
     private boolean quit;
 
-    public JenkinsMonitor(final BlockingQueue<Message<JenkinsBuild>> queue, Configuration configuration) {
+    public JenkinsMonitor(final BlockingQueue<Message<Map<String, JenkinsBuild>>> queue, Configuration configuration) {
         this.queue = queue;
         this.quit = false
 
@@ -119,7 +159,7 @@ class JenkinsMonitor extends Thread {
                 || !configuration.containsKey("basicAuthentication")
                 || !configuration.containsKey("interestingBuildsList")) {
             // die, consumers.
-            queue.offer(new Message<JenkinsBuild>(JenkinsBuild.green, Message.MessageType.END))
+            queue.offer(new Message<Map<String, JenkinsBuild>>())
             throw new RuntimeException("mainUrl, basicAuthentication and interestingBuildsList have to be configured in settings.properties!")
         }
         try {
@@ -136,7 +176,7 @@ class JenkinsMonitor extends Thread {
 
     @Override
     public void run() {
-        JenkinsBuild currentState
+        Map<String, JenkinsBuild> currentState
         def closure = { quit = true }
         while (!quit) {
 
@@ -144,14 +184,15 @@ class JenkinsMonitor extends Thread {
                 currentState = statusReport()
                 log.debug(currentState.toString())
             } catch (Exception e) {
-                currentState = JenkinsBuild.exception
+                currentState = new HashMap<>()
+                currentState.put("ERROR", JenkinsBuild.exception)
                 log.error(currentState.toString(), e)
             }
-            queue.offer(new Message<JenkinsBuild>(currentState))
+            queue.offer(new Message<Map<String, JenkinsBuild>>(currentState))
 
             sleep(millisForNextCheck, closure) // need a closure here, default sleep ignores interrupts
         }
-        queue.offer(new Message<JenkinsBuild>(JenkinsBuild.green, Message.MessageType.END))
+        queue.offer(new Message<Map<String, JenkinsBuild>>())
         System.out.println("Jenkins Monitor terminated.")
     }
 
@@ -159,65 +200,58 @@ class JenkinsMonitor extends Thread {
         this.quit = true
     }
 
-    static JenkinsBuild statusReport() {
+    static Map<String, JenkinsBuild> statusReport() {
 
         def url = (mainUrl + '/api/json?tree=jobs[name,color,url]').toURL()
         def json = url.getText requestProperties: ['Authorization': ('Basic ' + basicAuthentication)]
         def result = new JsonSlurper().parseText json
 
         def interestingBuilds = Eval.me(interestingBuildsList)
-        def animIfBuilding = Eval.me(animIfBuildingList)
         def missingJobs = new ArrayList<>((Collection) interestingBuilds)
 
-        def greenAnim = false
+        def resultMap = new HashMap<String, JenkinsBuild>()
+
         for (def job : result.jobs) {
             if (job.name.trim().toLowerCase() in interestingBuilds) {
                 missingJobs.remove(job.name.trim().toLowerCase())
                 if (job.color in failingColors) {
-                    return JenkinsBuild.red
+                    resultMap.put(job.name, JenkinsBuild.red)
                 } else if (job.color in failingAnimColors) {
-                    return JenkinsBuild.red_anim
+                    resultMap.put(job.name, JenkinsBuild.red_anim)
                 } else if (job.color in unstableColors) {
-                    return JenkinsBuild.yellow
+                    resultMap.put(job.name, JenkinsBuild.yellow)
                 } else if (job.color in unstableAnimColors) {
-                    return JenkinsBuild.yellow_anim
+                    resultMap.put(job.name, JenkinsBuild.yellow_anim)
                 } else if (job.color in abortedColors) {
-                    return JenkinsBuild.gray
+                    resultMap.put(job.name, JenkinsBuild.gray)
                 } else if (job.color in abortedAnimColors) {
-                    return JenkinsBuild.gray_anim
-                }
-            }
-            if (job.name.trim().toLowerCase() in animIfBuilding) {
-                if (job.color in successAnimColors) {
-                    greenAnim = true
+                    resultMap.put(job.name, JenkinsBuild.gray_anim)
+                } else if (job.color in successColors) {
+                    resultMap.put(job.name, JenkinsBuild.green)
+                } else if (job.color in successAnimColors) {
+                    resultMap.put(job.name, JenkinsBuild.green_anim)
                 }
             }
         }
-        if (missingJobs.isEmpty()) {
-            if (greenAnim) {
-                return JenkinsBuild.green_anim
-            }
-            return JenkinsBuild.green
-        }
-        return JenkinsBuild.missing
+        return resultMap
     }
 }
 
 /** Multiplexer */
-class Broadcaster extends Thread {
+class Broadcaster<T> extends Thread {
 
-    private final BlockingQueue<Message<JenkinsBuild>> queue
+    private final BlockingQueue<Message<T>> queue
     private boolean quit;
 
-    private final List<BlockingQueue<Message<JenkinsBuild>>> consumers
+    private final List<BlockingQueue<Message<T>>> consumers
 
-    public Broadcaster(final BlockingQueue<Message<JenkinsBuild>> queue) {
+    public Broadcaster(final BlockingQueue<Message<T>> queue) {
         this.queue = queue;
         this.quit = false;
-        this.consumers = new ArrayList<BlockingQueue<Message<JenkinsBuild>>>()
+        this.consumers = new ArrayList<BlockingQueue<Message<T>>>()
     }
 
-    public addConsumer(BlockingQueue<Message<JenkinsBuild>> consumer) {
+    public addConsumer(BlockingQueue<Message<T>> consumer) {
         if (consumer != null) {
             consumers.add consumer
         }
@@ -227,9 +261,10 @@ class Broadcaster extends Thread {
         this.quit = true
     }
 
+    @Override
     public void run() {
         while (!quit) {
-            Message<JenkinsBuild> consumed = null
+            Message<T> consumed = null
             while (!interrupted() && consumed == null) {
                 try {
                     consumed = queue.poll(2L, TimeUnit.SECONDS);
@@ -238,7 +273,7 @@ class Broadcaster extends Thread {
                 }
             }
 
-            for (BlockingQueue<Message<JenkinsBuild>> consumer : consumers) {
+            for (BlockingQueue<Message<T>> consumer : consumers) {
                 consumer.offer(consumed)
             }
 
@@ -286,7 +321,11 @@ public class Message<E> {
     private final E message;
 
     public Message(final E message) {
-        this(message, MessageType.STANDARD);
+        this(message, MessageType.STANDARD)
+    }
+
+    public Message() {
+        this(null, MessageType.END)
     }
 
     public Message(final E message, final MessageType type) {
