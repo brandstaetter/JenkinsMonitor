@@ -20,8 +20,6 @@ class PiOutput extends AbstractConsoleOutput {
 
     private GpioPinDigitalOutput statusPin;
     private GpioPinDigitalOutput buildingPin;
-    private Future<?> buildingFuture;
-    private Future<?> statusFuture;
 
     PiOutput(BlockingQueue<Message<JenkinsBuild>> queue, Configuration configuration) {
         super(queue, configuration)
@@ -46,20 +44,20 @@ class PiOutput extends AbstractConsoleOutput {
         JenkinsBuild currentSimpleState = ThreadedJenkinsMonitor.getSimpleResult(currentStates, configuration)
         switch (currentSimpleState) {
             case JenkinsBuild.green_anim:
-                buildingFuture = doBlink(buildingPin)
+                buildingPin.high();
             case JenkinsBuild.green:
-                statusPin.high();
+                statusPin.low();
                 break;
             case JenkinsBuild.yellow_anim:
-                buildingFuture = doBlink(buildingPin)
+                buildingPin.high()
             case JenkinsBuild.yellow:
-                statusFuture = doBlink(statusPin)
+                statusPin.high();
                 break;
             case JenkinsBuild.gray_anim:
             case JenkinsBuild.red_anim:
-                buildingFuture = doBlink(buildingPin)
+                buildingPin.high();
             default:
-                statusPin.low();
+                statusPin.high();
                 break;
         }
     }
@@ -70,32 +68,15 @@ class PiOutput extends AbstractConsoleOutput {
         GpioFactory.getInstance().shutdown()
     }
 
-    @SuppressWarnings("GroovyFallthrough")
     @Override
     protected void printStatesChange(JenkinsBuild lastState, Map<String, JenkinsBuild> currentStates, double timeInMinutes) {
-        switch(lastState) {
-            case JenkinsBuild.yellow_anim:
-                resetFuture(buildingFuture)
-            case JenkinsBuild.yellow:
-                resetFuture(statusFuture)
-                break;
-            default:
-                resetFuture(buildingFuture)
-        }
+        // nothing todo
     }
 
     @Override
     protected void printTerminated() {
         resetFuture(buildingFuture)
         resetFuture(statusFuture)
-    }
-
-    private static void resetFuture(Future<?> f) {
-        if (f!=null) f.cancel(true)
-    }
-
-    private Future<?> doBlink(GpioPinDigitalOutput pin) {
-        return pin.blink(1000)
     }
 }
 
