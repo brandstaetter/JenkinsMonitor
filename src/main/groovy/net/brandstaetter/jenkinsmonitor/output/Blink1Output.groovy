@@ -67,34 +67,46 @@ class Blink1Output extends Thread {
 
             if (blink1.getCount() > 0) {
                 if (currentState.blinking) {
-                    blink1.open();
-                    blink1.fadeToRGB(blinkFadeTimeMillis, Color.black);
-                    blink1.close();
+                    fade(blink1, Color.black)
                     sleep(blinkFadeTimeMillis * 3, closure)
                     if (quit) {
                         break
                     }
-                    blink1.open();
-                    blink1.fadeToRGB(blinkFadeTimeMillis, col);
-                    blink1.close();
+                    fade(blink1, col)
                     sleep(blinkFadeTimeMillis * 3, closure)
                     if (quit) {
                         break
                     }
                 } else {
-                    blink1.open();
-                    blink1.fadeToRGB(blinkFadeTimeMillis, col);
-                    blink1.close();
+                    fade(blink1, col)
                 }
             }
 
         }
         if (blink1.count > 0) {
-            blink1.open()
-            blink1.setRGB(Color.black)
-            blink1.close()
+            setAll(blink1, Color.black)
         }
         System.out.println("blink(1) Output terminated.")
+    }
+
+    private static void fade(Blink1 blink1, Color col) {
+        for (def i = 0; i < blink1.getCount(); i++) {
+            fade(blink1, i, col)
+        }
+    }
+
+    private static void fade(Blink1 blink1, int id, Color col) {
+        blink1.openById(id);
+        blink1.fadeToRGB(blinkFadeTimeMillis, col);
+        blink1.close();
+    }
+
+    private static void setAll(Blink1 blink1, Color col) {
+        for (def i = 0; i < blink1.getCount(); i++) {
+            blink1.openById(i);
+            blink1.setRGB(col);
+            blink1.close();
+        }
     }
 
 }
