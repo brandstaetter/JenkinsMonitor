@@ -14,10 +14,10 @@ abstract class AbstractConsoleOutput extends Thread {
     private static int buildsPerRow = 10
     private static int buildsPerSeparator = 5
     private static JenkinsBuild lastState
-    private static JenkinsBuild currentState
+    private static Map<String, JenkinsBuild> currentState
 
     private final BlockingQueue<Message<Map<String, JenkinsBuild>>> queue
-    private final Configuration configuration
+    protected final Configuration configuration
     private boolean quit;
 
     public AbstractConsoleOutput(
@@ -69,7 +69,7 @@ abstract class AbstractConsoleOutput extends Thread {
                 tellQuit()
                 break;
             }
-            currentState = ThreadedJenkinsMonitor.getSimpleResult(consumed.message, configuration)
+            currentState = consumed.message
             Date currentTime = new Date()
             //noinspection GrDeprecatedAPIUsage
             if (currentDay.getDay() != currentTime.getDay()) {
@@ -77,12 +77,13 @@ abstract class AbstractConsoleOutput extends Thread {
                 counter = 1
                 printNewDay(sdfDay.format(currentDay))
             }
-            if (!lastState.equals(currentState)) {
-                printStateChange(lastState, currentState, (currentTime.getTime() - lastStateChangeDate.getTime()) / (1000 * 60))
-                lastState = currentState;
+            def currentSimpleState = ThreadedJenkinsMonitor.getSimpleResult(currentState, configuration)
+            if (!lastState.equals(currentSimpleState)) {
+                printStatesChange(lastState, currentState, (currentTime.getTime() - lastStateChangeDate.getTime()) / (1000 * 60))
+                lastState = currentSimpleState
                 lastStateChangeDate = currentTime
             }
-            printCurrentState(sdfHour.format(currentTime), currentState)
+            printCurrentStates(sdfHour.format(currentTime), currentState)
             if ((counter % buildsPerRow) == 0) System.out.println();
             if ((counter % buildsPerSeparator) == 0 && (counter % buildsPerRow) != 0) printSeparator()
             counter++
@@ -95,11 +96,12 @@ abstract class AbstractConsoleOutput extends Thread {
 
     protected abstract void printNewDay(String newDay)
 
-    protected abstract void printCurrentState(String currentTime, JenkinsBuild currentState)
+    protected abstract void printCurrentStates(String currentTime, Map<String, JenkinsBuild> currentStates)
 
     protected abstract void printSeparator()
 
-    protected abstract void printStateChange(JenkinsBuild lastState, JenkinsBuild currentState, double timeInMinutes)
+    protected
+    abstract void printStatesChange(JenkinsBuild lastState, Map<String, JenkinsBuild> currentStates, double timeInMinutes)
 
     protected abstract void printTerminated()
 

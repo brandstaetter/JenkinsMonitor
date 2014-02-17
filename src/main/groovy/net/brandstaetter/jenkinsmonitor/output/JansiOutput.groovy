@@ -2,6 +2,7 @@ package net.brandstaetter.jenkinsmonitor.output
 
 import net.brandstaetter.jenkinsmonitor.JenkinsBuild
 import net.brandstaetter.jenkinsmonitor.Message
+import net.brandstaetter.jenkinsmonitor.ThreadedJenkinsMonitor
 import org.apache.commons.configuration.Configuration
 import org.fusesource.jansi.Ansi
 import org.fusesource.jansi.AnsiConsole
@@ -31,9 +32,10 @@ class JansiOutput extends AbstractConsoleOutput {
     }
 
     @Override
-    protected void printCurrentState(String currentTime, JenkinsBuild currentState) {
+    protected void printCurrentStates(String currentTime, Map<String, JenkinsBuild> currentStates) {
+        JenkinsBuild currentSimpleState = ThreadedJenkinsMonitor.getSimpleResult(currentStates, configuration)
         def translated;
-        switch (currentState.c) {
+        switch (currentSimpleState.c) {
             case Color.GREEN:
                 translated = Ansi.Color.GREEN;
                 break;
@@ -56,7 +58,7 @@ class JansiOutput extends AbstractConsoleOutput {
                 translated = Ansi.Color.DEFAULT
         }
         def fg = Ansi.Color.BLACK;
-        if (translated == Ansi.Color.BLUE || currentState.blinking) {
+        if (translated == Ansi.Color.BLUE || currentSimpleState.blinking) {
             fg = Ansi.Color.WHITE
         }
 
@@ -69,8 +71,9 @@ class JansiOutput extends AbstractConsoleOutput {
     }
 
     @Override
-    protected void printStateChange(JenkinsBuild lastState, JenkinsBuild currentState, double timeInMinutes) {
-        log.info("state change: $lastState -> $currentState, $lastState lasted for " + timeInMinutes + " minutes");
+    protected void printStatesChange(JenkinsBuild lastState, Map<String, JenkinsBuild> currentStates, double timeInMinutes) {
+        JenkinsBuild currentSimpleState = ThreadedJenkinsMonitor.getSimpleResult(currentStates, configuration)
+        log.info("state change: $lastState -> $currentSimpleState, $lastState lasted for " + timeInMinutes + " minutes");
     }
 
     @Override

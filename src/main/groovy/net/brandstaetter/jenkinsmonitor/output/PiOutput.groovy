@@ -3,6 +3,7 @@ package net.brandstaetter.jenkinsmonitor.output
 import com.pi4j.io.gpio.*
 import net.brandstaetter.jenkinsmonitor.JenkinsBuild
 import net.brandstaetter.jenkinsmonitor.Message
+import net.brandstaetter.jenkinsmonitor.ThreadedJenkinsMonitor
 import org.apache.commons.configuration.Configuration
 
 import java.util.concurrent.BlockingQueue
@@ -41,8 +42,9 @@ class PiOutput extends AbstractConsoleOutput {
 
     @SuppressWarnings("GroovyFallthrough")
     @Override
-    protected void printCurrentState(String currentTime, JenkinsBuild currentState) {
-        switch (currentState) {
+    protected void printCurrentStates(String currentTime, Map<String, JenkinsBuild> currentStates) {
+        JenkinsBuild currentSimpleState = ThreadedJenkinsMonitor.getSimpleResult(currentStates, configuration)
+        switch (currentSimpleState) {
             case JenkinsBuild.green_anim:
                 buildingFuture = doBlink(buildingPin)
             case JenkinsBuild.green:
@@ -69,7 +71,7 @@ class PiOutput extends AbstractConsoleOutput {
 
     @SuppressWarnings("GroovyFallthrough")
     @Override
-    protected void printStateChange(JenkinsBuild lastState, JenkinsBuild currentState, double timeInMinutes) {
+    protected void printStatesChange(JenkinsBuild lastState, Map<String, JenkinsBuild> currentStates, double timeInMinutes) {
         switch(lastState) {
             case JenkinsBuild.yellow_anim:
                 resetFuture(buildingFuture)
