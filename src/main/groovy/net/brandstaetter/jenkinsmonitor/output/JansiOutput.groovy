@@ -34,8 +34,14 @@ class JansiOutput extends AbstractConsoleOutput {
     @Override
     protected void printCurrentStates(String currentTime, Map<String, JenkinsBuild> currentStates) {
         JenkinsBuild currentSimpleState = ThreadedJenkinsMonitor.getSimpleResult(currentStates, configuration)
+        def (Ansi.Color translated, Ansi.Color fg) = translate(currentSimpleState)
+
+        System.out.print(Ansi.ansi().bg(translated).fg(fg).a(currentTime).reset())
+    }
+
+    private static java.util.List translate(JenkinsBuild state) {
         def translated;
-        switch (currentSimpleState.c) {
+        switch (state.c) {
             case Color.GREEN:
                 translated = Ansi.Color.GREEN;
                 break;
@@ -58,11 +64,13 @@ class JansiOutput extends AbstractConsoleOutput {
                 translated = Ansi.Color.DEFAULT
         }
         def fg = Ansi.Color.BLACK;
-        if (translated == Ansi.Color.BLUE || currentSimpleState.blinking) {
+        if (translated == Ansi.Color.BLUE || state.blinking) {
             fg = Ansi.Color.WHITE
         }
-
-        System.out.print(Ansi.ansi().bg(translated).fg(fg).a(currentTime).reset())
+        if (translated == Ansi.Color.WHITE && state.blinking) {
+            fg = Ansi.Color.BLUE
+        }
+        return [translated, fg]
     }
 
     @Override
