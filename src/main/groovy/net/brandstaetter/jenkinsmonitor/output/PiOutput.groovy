@@ -7,7 +7,6 @@ import net.brandstaetter.jenkinsmonitor.ThreadedJenkinsMonitor
 import org.apache.commons.configuration.Configuration
 
 import java.util.concurrent.BlockingQueue
-import java.util.concurrent.Future
 
 /**
  * Created with IntelliJ IDEA.
@@ -45,18 +44,27 @@ class PiOutput extends AbstractConsoleOutput {
         switch (currentSimpleState) {
             case JenkinsBuild.green_anim:
                 buildingPin.high();
+                statusPin.low();
+                break;
             case JenkinsBuild.green:
                 statusPin.low();
+                buildingPin.low();
                 break;
             case JenkinsBuild.yellow_anim:
                 buildingPin.high()
+                statusPin.high();
+                break;
             case JenkinsBuild.yellow:
                 statusPin.high();
+                buildingPin.low();
                 break;
             case JenkinsBuild.gray_anim:
             case JenkinsBuild.red_anim:
                 buildingPin.high();
+                statusPin.high();
+                break;
             default:
+                buildingPin.low();
                 statusPin.high();
                 break;
         }
@@ -64,8 +72,6 @@ class PiOutput extends AbstractConsoleOutput {
 
     @Override
     protected void printSeparator() {
-        //shutdown gpio
-        GpioFactory.getInstance().shutdown()
     }
 
     @Override
@@ -75,8 +81,11 @@ class PiOutput extends AbstractConsoleOutput {
 
     @Override
     protected void printTerminated() {
-        resetFuture(buildingFuture)
-        resetFuture(statusFuture)
+        //shutdown gpio
+        buildingPin.low();
+        statusPin.low();
+        GpioFactory.getInstance().shutdown()
+        System.out.println("Pi Output terminated.")
     }
 }
 
